@@ -11,11 +11,19 @@ if "initialized" not in st.session_state:
     st.session_state.initialized = False
     st.session_state.messages = []
     st.session_state.agent_manager = AgentManager()
-    st.session_state.agent_manager.setup_mcp_clients(load_mcp_config())
     st.session_state.agent = None
     st.session_state.tool_calls = {}
     st.session_state.displayed_tools = set()
     st.session_state.current_message_tools = {}
+    st.session_state.mcp_loading = True
+    st.session_state.mcp_loaded = False
+    # Start initial MCP client setup
+    with st.spinner("Loading MCP servers..."):
+        st.session_state.agent_manager.setup_mcp_clients(load_mcp_config())
+        st.session_state.mcp_loaded = bool(
+            st.session_state.agent_manager.get_server_tools_info()
+        )
+        st.session_state.mcp_loading = False
 
 
 def handle_streaming_data(data):
@@ -195,9 +203,33 @@ def create_agent_with_config():
 
 def reset_agent():
     """Reset the agent and clear the chat history."""
+    # First, shutdown any existing agent and MCP clients
+    if st.session_state.agent_manager:
+        # Set loading state
+        st.session_state.mcp_loading = True
+        st.session_state.mcp_loaded = False
+
+        # Shutdown current agent
+        st.session_state.agent_manager.shutdown_current_agent()
+
+        # Show spinner during MCP loading
+        with st.spinner("Loading MCP servers..."):
+            # Reestablish MCP connections after shutdown
+            st.session_state.agent_manager.setup_mcp_clients(load_mcp_config())
+            st.session_state.mcp_loaded = bool(
+                st.session_state.agent_manager.get_server_tools_info()
+            )
+            st.session_state.mcp_loading = False
+
+            # No success message as per user feedback
+
+    # Reset UI state
     st.session_state.messages = []
     st.session_state.tool_calls = {}
     st.session_state.displayed_tools = set()
+    st.session_state.current_message_tools = {}
+
+    # Create a new agent
     create_agent_with_config()
 
 
@@ -294,12 +326,18 @@ with st.sidebar.expander("⚙️ Parameters", expanded=False):
 
 # MCP configuration
 with st.sidebar.expander("🛠️ MCP Tools", expanded=True):
-    server_info = st.session_state.agent_manager.get_server_tools_info()
-    if server_info:
-        for server, tool_count in server_info:
-            st.success(f"{server} ({tool_count})")
+    # Display loading status
+    if st.session_state.mcp_loading:
+        st.spinner("Loading MCP servers...")
+        st.info("MCP servers are initializing...")
     else:
-        st.info("No active MCP servers")
+        # Show server info without the success message
+        server_info = st.session_state.agent_manager.get_server_tools_info()
+        if server_info:
+            for server, tool_count in server_info:
+                st.info(f"🔌 {server} ({tool_count} tools)")
+        else:
+            st.warning("⚠️ No active MCP servers")
 
 # Initialize agent if needed
 if not st.session_state.initialized:
@@ -311,8 +349,20 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
 
 # Chat functionality
-mcp_loaded = bool(st.session_state.agent_manager.get_server_tools_info())
-if mcp_loaded:
+if st.session_state.mcp_loading:
+    # Show loading message with prominent spinner
+    loading_col1, loading_col2 = st.columns([1, 4])
+    with loading_col1:
+        st.spinner()
+    with loading_col2:
+        st.info(
+            "Loading MCP servers... The chat will be available once servers are connected."
+        )
+
+    # Disable chat input during loading
+    st.chat_input("Loading servers...", disabled=True)
+elif st.session_state.mcp_loaded:
+    # Enable chat input when MCP servers are loaded
     user_input = st.chat_input("Ask something...")
     if user_input:
         # Add user message to history
@@ -383,4 +433,28 @@ if mcp_loaded:
             # Reset current message tools for next interaction
             st.session_state.current_message_tools = {}
 else:
-    st.info("Loading MCP servers... Please wait.")
+    # No MCP servers loaded
+    st.error("❌ No MCP servers available. Chat functionality is disabled.")
+
+    # Retry button for server connection
+    if st.button("Retry MCP Connection", type="primary", use_container_width=True):
+        # Set loading state
+        st.session_state.mcp_loading = True
+
+        # Show spinner during MCP loading attempt
+        with st.spinner("Attempting to connect to MCP servers..."):
+            st.session_state.agent_manager.setup_mcp_clients(load_mcp_config())
+            st.session_state.mcp_loaded = bool(
+                st.session_state.agent_manager.get_server_tools_info()
+            )
+            st.session_state.mcp_loading = False
+
+            # Show toast notification only for failure
+            if st.session_state.mcp_loaded:
+                # Just rerun without the success message
+                st.rerun()
+            else:
+                st.toast("Failed to connect to MCP servers", icon="❌")
+
+    # Disable chat input
+    st.chat_input("MCP servers unavailable", disabled=True)

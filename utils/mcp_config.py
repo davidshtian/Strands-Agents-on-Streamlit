@@ -1,62 +1,53 @@
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 
 def load_mcp_config() -> Dict[str, Any]:
-    """
-    Load MCP configuration from default file locations.
-
-    Returns:
-        Dict[str, Any]: MCP configuration with server information
-    """
-    config = {"servers": []}
-    config_paths = [
+    """Load MCP configuration from default file locations."""
+    # Check standard config paths
+    paths = [
         Path.home() / ".aws" / "amazonq" / "mcp.json",
         Path.home() / ".mcp.json",
     ]
 
-    for config_path in config_paths:
-        if not config_path.exists():
+    # Try to load config from each path
+    for path in paths:
+        if not path.exists():
             continue
 
         try:
-            with open(config_path, "r") as f:
-                loaded_config = json.load(f)
+            # Load the JSON config
+            with open(path, "r") as f:
+                config = json.load(f)
 
-            # Convert amazonq format if needed
-            if "mcpServers" in loaded_config:
-                convert_amazonq_format(loaded_config, config)
-            elif "servers" in loaded_config:
-                config = loaded_config
+            # Handle mcpServers format (AmazonQ format)
+            if "mcpServers" in config:
+                servers = []
 
-            # Successfully loaded, no need to check other paths
+                # Convert to the format expected by agent_manager
+                for name, server in config["mcpServers"].items():
+                    if server.get("disabled", False):
+                        continue
+
+                    servers.append(
+                        {
+                            "name": name,
+                            "command": server.get("command", ""),
+                            "args": server.get("args", []),
+                        }
+                    )
+
+                return {"servers": servers}
+
+            # Handle standard format with servers key
+            elif "servers" in config:
+                return config
+
             break
         except Exception as e:
-            logging.warning(f"Error loading MCP config from {config_path}: {e}")
+            logging.warning(f"Error loading MCP config from {path}: {e}")
 
-    return config
-
-
-def convert_amazonq_format(source: Dict[str, Any], target: Dict[str, Any]) -> None:
-    """
-    Convert amazonq MCP format to standard format.
-
-    Args:
-        source: Source config in amazonq format
-        target: Target config to store converted data
-    """
-    for name, server_config in source["mcpServers"].items():
-        # Skip disabled servers
-        if server_config.get("disabled", False):
-            continue
-
-        # Add to target config in standard format
-        target["servers"].append(
-            {
-                "name": name,
-                "command": server_config.get("command", ""),
-                "args": server_config.get("args", []),
-            }
-        )
+    # Return empty config if nothing was found
+    return {"servers": []}
