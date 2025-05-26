@@ -4,7 +4,7 @@ from utils.mcp_config import load_mcp_config
 from utils.agent_manager import AgentManager
 
 # Set up page configuration
-st.set_page_config(page_title="Strands Agents", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Strands Agents", page_icon="🤖", layout="wide")
 
 # Initialize session state variables
 if "initialized" not in st.session_state:
@@ -202,7 +202,7 @@ def reset_agent():
 
 
 # Main UI
-st.title("🧠 Strands Agents")
+st.title("🤖 Strands Agents")
 st.caption("Strands Agents using Amazon Bedrock models")
 
 # Sidebar configuration
