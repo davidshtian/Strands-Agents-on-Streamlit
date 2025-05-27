@@ -17,6 +17,7 @@ if "initialized" not in st.session_state:
     st.session_state.current_message_tools = {}
     st.session_state.mcp_loading = True
     st.session_state.mcp_loaded = False
+    st.session_state.system_prompt = "You are a helpful AI assistant."
     # Start initial MCP client setup
     with st.spinner("Loading MCP servers..."):
         st.session_state.agent_manager.setup_mcp_clients(load_mcp_config())
@@ -26,9 +27,9 @@ if "initialized" not in st.session_state:
         st.session_state.mcp_loading = False
 
 
-def handle_streaming_data(data):
-    """Handle streaming text data from the agent."""
-    st.session_state.current_response += data
+def update_response(content):
+    """Add content to the current response and update the UI."""
+    st.session_state.current_response += content
     if "response_container" in st.session_state:
         st.session_state.response_container.markdown(st.session_state.current_response)
 
@@ -58,11 +59,9 @@ def handle_tool_result(message):
                 )
 
                 if result_content:
-                    result_info = (
-                        f"\n⚡ **Raw Tool Result:**\n```json\n{result_content}\n```\n"
+                    update_response(
+                        f"\n⚡ **Raw Tool Result:**\n```json\n{result_content}\n```\n--------------------\n"
                     )
-                    result_info += "--------------------\n"
-                    update_response(result_info)
 
 
 def handle_tool_use(tool_use):
@@ -71,7 +70,6 @@ def handle_tool_use(tool_use):
     tool_name = tool_use.get("name", "")
 
     # Skip if this specific tool call ID has already been displayed
-    # (but allow multiple calls to the same tool with different IDs)
     if not tool_name or tool_id in st.session_state.displayed_tools:
         return
 
@@ -90,14 +88,14 @@ def handle_tool_use(tool_use):
 
     # Format and add tool info to response
     tool_info = f"\n\n🛠️ **Tool Call: `{tool_name}`**\n"
+    tool_info += (
+        "📥 **Input:**\n```json\n"
+        if tool_use.get("input")
+        else "📥 **Input:** No parameters\n"
+    )
 
-    # Add formatted input parameters
     if tool_use.get("input"):
-        tool_info += "📥 **Input:**\n```json\n"
-        tool_info += json.dumps(tool_use.get("input"), indent=2)
-        tool_info += "\n```\n"
-    else:
-        tool_info += "📥 **Input:** No parameters\n"
+        tool_info += f"{json.dumps(tool_use.get('input'), indent=2)}\n```\n"
 
     update_response(tool_info)
 
@@ -109,56 +107,45 @@ def handle_tool_output(tool_use):
         return
 
     tool_name = tool_use.get("name", "")
+    update_tool_state = lambda status, data_key, data: update_tool_data(
+        tool_id, status, data_key, data
+    )
 
     # Handle successful output
     if tool_use.get("output"):
         output_data = tool_use.get("output")
-
-        # Update both global and current message tool data
-        st.session_state.tool_calls[tool_id]["output"] = output_data
-        st.session_state.tool_calls[tool_id]["status"] = "completed"
-
-        if tool_id in st.session_state.current_message_tools:
-            st.session_state.current_message_tools[tool_id]["output"] = output_data
-            st.session_state.current_message_tools[tool_id]["status"] = "completed"
+        update_tool_state("completed", "output", output_data)
 
         output_str = str(output_data)
         output_display = output_str[:500] + ("..." if len(output_str) > 500 else "")
-
-        output_info = (
-            f"\n📤 **Result from `{tool_name}`:**\n```\n{output_display}\n```\n"
+        update_response(
+            f"\n📤 **Result from `{tool_name}`:**\n```\n{output_display}\n```\n--------------------\n"
         )
-        output_info += "--------------------\n"
-        update_response(output_info)
 
     # Handle errors
     elif tool_use.get("error"):
         error_data = tool_use.get("error")
-
-        # Update both global and current message tool data
-        st.session_state.tool_calls[tool_id]["error"] = error_data
-        st.session_state.tool_calls[tool_id]["status"] = "failed"
-
-        if tool_id in st.session_state.current_message_tools:
-            st.session_state.current_message_tools[tool_id]["error"] = error_data
-            st.session_state.current_message_tools[tool_id]["status"] = "failed"
-
-        error_info = f"\n❌ **Error from `{tool_name}`:**\n```\n{error_data}\n```\n"
-        error_info += "--------------------\n"
-        update_response(error_info)
+        update_tool_state("failed", "error", error_data)
+        update_response(
+            f"\n❌ **Error from `{tool_name}`:**\n```\n{error_data}\n```\n--------------------\n"
+        )
 
 
-def update_response(content):
-    """Add content to the current response and update the UI."""
-    st.session_state.current_response += content
-    if "response_container" in st.session_state:
-        st.session_state.response_container.markdown(st.session_state.current_response)
+def update_tool_data(tool_id, status, data_key, data):
+    """Update tool data in both global and current message contexts."""
+    st.session_state.tool_calls[tool_id][data_key] = data
+    st.session_state.tool_calls[tool_id]["status"] = status
+
+    if tool_id in st.session_state.current_message_tools:
+        st.session_state.current_message_tools[tool_id][data_key] = data
+        st.session_state.current_message_tools[tool_id]["status"] = status
 
 
 def chat_callback_handler(**kwargs):
     """Callback handler for streaming agent responses."""
     if "data" in kwargs:
-        handle_streaming_data(kwargs["data"])
+        # Direct streaming data to update_response
+        update_response(kwargs["data"])
     elif "message" in kwargs and isinstance(kwargs["message"], dict):
         handle_tool_result(kwargs["message"])
     elif "current_tool_use" in kwargs:
@@ -191,6 +178,7 @@ def create_agent_with_config():
         ),
         "thinking_budget_tokens": st.session_state.get("thinking_budget_tokens", 4096),
         "callback_handler": chat_callback_handler,  # Always use callback handler regardless of thinking mode
+        "system_prompt": st.session_state.system_prompt,  # Use the custom system prompt
     }
 
     st.session_state.agent = st.session_state.agent_manager.create_agent(**config)
@@ -230,9 +218,10 @@ def reset_agent():
     create_agent_with_config()
 
 
-# Main UI
-st.title("🤖 Strands Agents")
-st.caption("Strands Agents using Amazon Bedrock models")
+# Main UI - only show title/caption once at the top
+with st.container():
+    st.title("🤖 Strands Agents")
+    st.caption("Strands Agents using Amazon Bedrock models")
 
 # Sidebar configuration
 st.sidebar.button(
@@ -247,8 +236,12 @@ model_options = ["Default (Claude 3.7 Sonnet)"] + [
 
 
 def update_model_selection():
-    """Update model ID in session state and reset the agent (same as 'New Chat')."""
+    """Update model ID in session state and reset the agent."""
     selected_option = st.session_state.selected_model_option
+
+    # Store previous model for logging
+    previous_model_id = st.session_state.get("model_id", "default")
+
     # Extract model_id from selection
     model_id_selected = (
         ""  # Use default
@@ -262,8 +255,34 @@ def update_model_selection():
             "",
         )
     )
-    st.session_state.model_id = model_id_selected
-    # Trigger the same action as 'New Chat'
+
+    # If model is different from current model, log change and handle transition
+    if previous_model_id != model_id_selected:
+        # Explicitly shut down current agent before changing model
+        # This ensures any ongoing requests are properly terminated
+        if st.session_state.agent:
+            with st.spinner(
+                f"Switching model from {previous_model_id} to {model_id_selected or 'Default'}..."
+            ):
+                # Force immediate agent shutdown
+                if hasattr(st.session_state.agent_manager, "_current_agent"):
+                    # Set callback handler to None to interrupt any active streams
+                    if hasattr(
+                        st.session_state.agent_manager._current_agent,
+                        "callback_handler",
+                    ):
+                        st.session_state.agent_manager._current_agent.callback_handler = (
+                            None
+                        )
+
+                # Full shutdown of agent and its resources
+                st.session_state.agent_manager.shutdown_current_agent()
+                st.session_state.agent = None
+
+        # Update the model ID in session state
+        st.session_state.model_id = model_id_selected
+
+    # Trigger the agent reset which will create a new agent with the selected model
     reset_agent()
 
 
@@ -276,6 +295,28 @@ with st.sidebar.expander("📋 Model Selection", expanded=True):
         on_change=update_model_selection,
     )
 
+# System prompt configuration
+with st.sidebar.expander("💬 System Prompt", expanded=False):
+
+    def update_system_prompt():
+        """Update system prompt and reset the agent."""
+        # Only reset if the prompt actually changed
+        if st.session_state.system_prompt_input != st.session_state.system_prompt:
+            # Update the prompt in session state
+            st.session_state.system_prompt = st.session_state.system_prompt_input
+            # Reset agent to apply new prompt
+            reset_agent()
+
+    # Text area for system prompt
+    st.text_area(
+        "Customize the AI's behavior",
+        value=st.session_state.system_prompt,
+        height=150,
+        key="system_prompt_input",
+        on_change=update_system_prompt,
+        help="Enter instructions that define how the AI should behave and respond",
+    )
+
 # Check if thinking mode is supported
 is_thinking_supported = st.session_state.agent_manager.is_thinking_supported(
     st.session_state.get("model_id", None)
@@ -283,6 +324,34 @@ is_thinking_supported = st.session_state.agent_manager.is_thinking_supported(
 
 # Parameters configuration
 with st.sidebar.expander("⚙️ Parameters", expanded=False):
+
+    def safe_parameter_change():
+        """Handle parameter changes with proper cleanup of previous agent."""
+        # Explicitly shut down current agent before changing parameters
+        if st.session_state.agent:
+            try:
+                # Force immediate agent shutdown
+                if hasattr(st.session_state.agent_manager, "_current_agent"):
+                    # Set callback handler to None to interrupt any active streams
+                    if hasattr(
+                        st.session_state.agent_manager._current_agent,
+                        "callback_handler",
+                    ):
+                        st.session_state.agent_manager._current_agent.callback_handler = (
+                            None
+                        )
+
+                # Do a partial shutdown - don't reset MCP connections since we're just
+                # changing parameters, not fully switching models
+                st.session_state.agent = None
+            except Exception:
+                # Log but continue even if there's an error
+                pass
+
+        # Now create the new agent with updated parameters
+        create_agent_with_config()
+
+    # Use the safe parameter change handler for all parameter changes
     st.slider(
         "Temperature",
         min_value=0.0,
@@ -290,7 +359,7 @@ with st.sidebar.expander("⚙️ Parameters", expanded=False):
         value=0.7,
         step=0.1,
         key="temperature",
-        on_change=create_agent_with_config,
+        on_change=safe_parameter_change,
     )
 
     # Show thinking mode toggle only for supported models
@@ -304,7 +373,7 @@ with st.sidebar.expander("⚙️ Parameters", expanded=False):
             value=st.session_state.get("enable_thinking", False),
             key="enable_thinking",
             help="Show agent reasoning process",
-            on_change=create_agent_with_config,
+            on_change=safe_parameter_change,
         )
 
         if st.session_state.get("enable_thinking", False):
@@ -316,7 +385,7 @@ with st.sidebar.expander("⚙️ Parameters", expanded=False):
                 step=1024,
                 key="thinking_budget_tokens",
                 help="Token budget for reasoning",
-                on_change=create_agent_with_config,
+                on_change=safe_parameter_change,
             )
     else:
         st.session_state.enable_thinking = False
@@ -374,7 +443,11 @@ elif st.session_state.mcp_loaded:
             st.session_state.current_response = ""
             st.session_state.displayed_tools = set()
 
+            # Store original messages before processing
+            orig_messages = st.session_state.messages.copy()
+
             try:
+                # Process the user input with the agent
                 response = st.session_state.agent(user_input)
 
                 # Extract any tool calls from the response when in thinking mode
@@ -415,11 +488,23 @@ elif st.session_state.mcp_loaded:
                 )
 
             except Exception as e:
-                error_message = f"Error: {str(e)}"
-                response_placeholder.error(error_message)
-                response_content = error_message
+                # Restore original messages to prevent chat history loss
+                st.session_state.messages = orig_messages
 
-                # Save error message to chat history
+                # Check if the error is likely a throttling issue for user-friendly message
+                error_str = str(e).lower()
+                if any(
+                    term in error_str
+                    for term in ["rate", "limit", "throttl", "quota", "exceed"]
+                ):
+                    error_message = "⚠️ The model was temporarily throttled due to high request volume. Please wait a moment and try again."
+                else:
+                    error_message = f"Error: {str(e)}"
+
+                # Display error in UI
+                response_placeholder.error(error_message)
+
+                # Add error message to chat history
                 st.session_state.messages.append(
                     {"role": "assistant", "content": error_message}
                 )

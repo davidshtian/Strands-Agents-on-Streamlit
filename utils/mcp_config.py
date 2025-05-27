@@ -18,29 +18,22 @@ def load_mcp_config() -> Dict[str, Any]:
             continue
 
         try:
-            # Load the JSON config
             with open(path, "r") as f:
                 config = json.load(f)
 
             # Handle mcpServers format (AmazonQ format)
             if "mcpServers" in config:
-                servers = []
-
-                # Convert to the format expected by agent_manager
-                for name, server in config["mcpServers"].items():
-                    if server.get("disabled", False):
-                        continue
-
-                    servers.append(
+                return {
+                    "servers": [
                         {
                             "name": name,
                             "command": server.get("command", ""),
                             "args": server.get("args", []),
                         }
-                    )
-
-                return {"servers": servers}
-
+                        for name, server in config["mcpServers"].items()
+                        if not server.get("disabled", False)
+                    ]
+                }
             # Handle standard format with servers key
             elif "servers" in config:
                 return config

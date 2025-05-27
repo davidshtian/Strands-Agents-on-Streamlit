@@ -86,7 +86,7 @@ class AgentManager:
             return
 
         try:
-            # Create client with stdio parameters
+            # Create and connect client
             client = MCPClient(
                 lambda: stdio_client(
                     StdioServerParameters(
@@ -96,10 +96,9 @@ class AgentManager:
             )
             self.mcp_clients[name] = client
 
-            # Connect and load available tools
+            # Connect and load tools in one block
             with client:
-                tools = client.list_tools_sync()
-                if tools:
+                if tools := client.list_tools_sync():
                     self.available_tools.extend(tools)
                     self.server_tools[name] = len(tools)
             client.start()
@@ -205,20 +204,36 @@ class AgentManager:
 
     def shutdown_current_agent(self) -> None:
         """Shutdown the current agent and its MCP clients."""
-        # Reset agent reference
-        self._current_agent = None
+        # Terminate agent if it exists
+        if self._current_agent:
+            try:
+                # Clear any ongoing callbacks to interrupt active operations
+                if hasattr(self._current_agent, "callback_handler"):
+                    self._current_agent.callback_handler = None
+
+                # Log the termination of model resources if they exist
+                if hasattr(self._current_agent, "model") and self._current_agent.model:
+                    logging.info("Terminating model client resources")
+            except Exception as e:
+                logging.error(f"Error while terminating agent: {e}")
+
+            # Always reset agent reference regardless of errors
+            self._current_agent = None
+            logging.info("Agent reference cleared")
 
         # Cleanup MCP clients
         for name, client in list(self.mcp_clients.items()):
             try:
-                # Context manager compatibility for client stop
+                logging.info(f"Stopping MCP client: {name}")
                 client.stop(None, None, None)
 
-                # Remove client references
+                # Remove references and log success
                 self.mcp_clients.pop(name, None)
                 self.server_tools.pop(name, None)
+                logging.info(f"MCP client {name} stopped successfully")
             except Exception as e:
                 logging.error(f"Error shutting down MCP client {name}: {e}")
 
-        # Clear available tools
+        # Reset available tools
         self.available_tools = []
+        logging.info("Agent and MCP clients shutdown complete")
