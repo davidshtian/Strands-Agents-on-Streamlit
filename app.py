@@ -250,7 +250,7 @@ model_options = ["Default (Claude 3.7 Sonnet)"] + [
 
 
 def update_model_selection():
-    """Update model ID in session state and create a new agent."""
+    """Update model ID in session state and reset the agent (same as 'New Chat')."""
     selected_option = st.session_state.selected_model_option
     # Extract model_id from selection
     model_id_selected = (
@@ -266,8 +266,8 @@ def update_model_selection():
         )
     )
     st.session_state.model_id = model_id_selected
-    # Force agent recreation with the new model
-    create_agent_with_config()
+    # Trigger the same action as 'New Chat'
+    reset_agent()
 
 
 with st.sidebar.expander("📋 Model Selection", expanded=True):
