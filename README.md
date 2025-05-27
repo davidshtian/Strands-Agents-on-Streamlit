@@ -2,7 +2,7 @@
 
 A streamlined agent application built with [Strands Agents](https://strandsagents.com/) and [Streamlit](https://streamlit.io/), providing a user-friendly interface for interacting with AI agents powered by Amazon Bedrock models, with support for MCP server tools integration.
 
-<img width="1907" alt="image" src="https://github.com/user-attachments/assets/3906c62b-2e3f-4e21-b7fb-9b9955c29aed" />
+<img width="1906" alt="image" src="https://github.com/user-attachments/assets/c8c1fd2b-fbb0-470c-aa3e-24fa0331df28" />
 
 
 ## Features
