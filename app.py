@@ -70,11 +70,12 @@ def handle_tool_use(tool_use):
     tool_id = tool_use.get("toolUseId", "unknown")
     tool_name = tool_use.get("name", "")
 
-    # Skip if this tool has already been displayed
-    if not tool_name or tool_name in st.session_state.displayed_tools:
+    # Skip if this specific tool call ID has already been displayed
+    # (but allow multiple calls to the same tool with different IDs)
+    if not tool_name or tool_id in st.session_state.displayed_tools:
         return
 
-    st.session_state.displayed_tools.add(tool_name)
+    st.session_state.displayed_tools.add(tool_id)
 
     # Store tool call data in both global and current message contexts
     tool_data = {
@@ -167,7 +168,7 @@ def chat_callback_handler(**kwargs):
         if tool_use.get("name"):
             handle_tool_use(tool_use)
 
-        # Handle tool output/error events
+        # Handle tool output/errors
         if tool_use.get("output") or tool_use.get("error"):
             handle_tool_output(tool_use)
 
@@ -189,11 +190,7 @@ def create_agent_with_config():
             else False
         ),
         "thinking_budget_tokens": st.session_state.get("thinking_budget_tokens", 4096),
-        "callback_handler": (
-            None
-            if st.session_state.get("enable_thinking", False)
-            else chat_callback_handler
-        ),
+        "callback_handler": chat_callback_handler,  # Always use callback handler regardless of thinking mode
     }
 
     st.session_state.agent = st.session_state.agent_manager.create_agent(**config)
@@ -380,20 +377,42 @@ elif st.session_state.mcp_loaded:
             try:
                 response = st.session_state.agent(user_input)
 
-                # Handle response based on thinking mode
-                response_content = (
-                    response.message
-                    if st.session_state.enable_thinking
-                    else st.session_state.current_response
-                )
+                # Extract any tool calls from the response when in thinking mode
+                if st.session_state.enable_thinking:
+                    # Display the model's response first
+                    response_placeholder.markdown(response.message)
+
+                    # If there are tool calls in thinking mode, append them to the response
+                    tool_content = ""
+                    if st.session_state.current_message_tools:
+                        tool_content = "\n\n**Tool Calls:**\n"
+                        for (
+                            tool_id,
+                            tool_data,
+                        ) in st.session_state.current_message_tools.items():
+                            tool_content += f"- **{tool_data['name']}**\n"
+                            if tool_data.get("input"):
+                                tool_content += (
+                                    f"  - Input: `{json.dumps(tool_data['input'])}`\n"
+                                )
+                            if tool_data.get("output"):
+                                output_str = str(tool_data["output"])
+                                output_display = output_str[:200] + (
+                                    "..." if len(output_str) > 200 else ""
+                                )
+                                tool_content += f"  - Output: `{output_display}`\n"
+                            if tool_data.get("error"):
+                                tool_content += f"  - Error: `{tool_data['error']}`\n"
+
+                    # Combine the response message with tool information
+                    response_content = response.message + tool_content
+                else:
+                    response_content = st.session_state.current_response
 
                 # Save assistant response to chat history
                 st.session_state.messages.append(
                     {"role": "assistant", "content": response_content}
                 )
-
-                if st.session_state.enable_thinking:
-                    response_placeholder.markdown(response_content)
 
             except Exception as e:
                 error_message = f"Error: {str(e)}"
