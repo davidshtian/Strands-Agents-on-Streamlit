@@ -22,7 +22,7 @@ from strands_tools import (
     shell,
     # File handling tools
     editor,
-    file_read,  # retrieve,
+    file_read,
     # Media tools
     generate_image,
     image_reader,
@@ -31,7 +31,9 @@ from strands_tools import (
     http_request,
     journal,
     load_tool,
-    use_aws,  # use_llm,
+    use_aws,
+    # Commented out tools
+    # retrieve, use_llm
 )
 
 
@@ -75,16 +77,12 @@ class AgentManager:
             self._setup_single_mcp_client(server)
 
     def _setup_single_mcp_client(self, server: Dict[str, Any]) -> None:
-        """Set up a single MCP client and load its tools."""
+        """Set up a single MCP client and load its tools with improved validation."""
         # Validate server configuration
-        if not isinstance(server, dict) or "name" not in server:
+        if not self._validate_server_config(server):
             return
 
         name = server["name"]
-        if "command" not in server or "args" not in server:
-            logging.error(f"Missing 'command' or 'args' for MCP server {name}")
-            return
-
         try:
             # Create and connect client
             client = MCPClient(
@@ -101,9 +99,27 @@ class AgentManager:
                 if tools := client.list_tools_sync():
                     self.available_tools.extend(tools)
                     self.server_tools[name] = len(tools)
+                    logging.info(f"Loaded {len(tools)} tools from {name}")
             client.start()
         except Exception as e:
             logging.error(f"Failed to setup MCP client for {name}: {e}")
+
+    def _validate_server_config(self, server: Dict[str, Any]) -> bool:
+        """Validate server configuration."""
+        if not isinstance(server, dict) or not server.get("name"):
+            logging.error("Server must have a name")
+            return False
+
+        name = server["name"]
+        if not server.get("command"):
+            logging.error(f"Missing command for MCP server {name}")
+            return False
+
+        if not isinstance(server.get("args", []), list):
+            logging.error(f"Args must be a list for MCP server {name}")
+            return False
+
+        return True
 
     def get_server_tools_info(self) -> List[Tuple[str, int]]:
         """Get information about servers and their tool counts."""

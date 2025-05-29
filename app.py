@@ -141,6 +141,36 @@ def update_tool_data(tool_id, status, data_key, data):
         st.session_state.current_message_tools[tool_id]["status"] = status
 
 
+def get_user_friendly_error(exception):
+    """Convert an exception into a user-friendly error message."""
+    error_type = type(exception).__name__
+    error_message = str(exception)
+
+    if not error_message:
+        error_message = f"An {error_type} occurred"
+
+    # Format common errors in a user-friendly way
+    if "Connection" in error_type or "Timeout" in error_type:
+        return f"⚠️ Connection issue: {error_message}. Please check your network and try again."
+    elif (
+        "Authentication" in error_type
+        or "Credential" in error_type
+        or "Auth" in error_type
+    ):
+        return (
+            f"⚠️ Authentication error: {error_message}. Please check your credentials."
+        )
+    elif "Permission" in error_type or "Access" in error_type:
+        return f"⚠️ Permission denied: {error_message}. You may not have access to this resource."
+    elif "NotFound" in error_type:
+        return f"⚠️ Resource not found: {error_message}"
+    elif "Invalid" in error_type or "Validation" in error_type:
+        return f"⚠️ Invalid input: {error_message}"
+
+    # Generic error message for unknown exceptions
+    return f"⚠️ Error: {error_message}"
+
+
 def chat_callback_handler(**kwargs):
     """Callback handler for streaming agent responses."""
     if "data" in kwargs:
@@ -490,49 +520,11 @@ elif st.session_state.mcp_loaded:
             except Exception as e:
                 # Restore original messages to prevent chat history loss
                 st.session_state.messages = orig_messages
-
-                # Check if the error is likely a throttling issue for user-friendly message
-                error_str = str(e).lower()
-                if any(
-                    term in error_str
-                    for term in ["rate", "limit", "throttl", "quota", "exceed"]
-                ):
-                    error_message = "⚠️ The model was temporarily throttled due to high request volume. Please wait a moment and try again."
-                else:
-                    error_message = f"Error: {str(e)}"
-
-                # Display error in UI
+                error_message = get_user_friendly_error(e)
                 response_placeholder.error(error_message)
-
-                # Add error message to chat history
                 st.session_state.messages.append(
                     {"role": "assistant", "content": error_message}
                 )
-
-            # Store the current message tools with the response
-            tool_content = ""
-            if (
-                st.session_state.current_message_tools
-                and not st.session_state.enable_thinking
-            ):
-                tool_content = "\n\n**Tool Calls:**\n"
-                for (
-                    tool_id,
-                    tool_data,
-                ) in st.session_state.current_message_tools.items():
-                    tool_content += f"- **{tool_data['name']}**\n"
-                    if tool_data.get("input"):
-                        tool_content += (
-                            f"  - Input: `{json.dumps(tool_data['input'])}`\n"
-                        )
-                    if tool_data.get("output"):
-                        output_str = str(tool_data["output"])
-                        output_display = output_str[:200] + (
-                            "..." if len(output_str) > 200 else ""
-                        )
-                        tool_content += f"  - Output: `{output_display}`\n"
-                    if tool_data.get("error"):
-                        tool_content += f"  - Error: `{tool_data['error']}`\n"
 
             # Reset current message tools for next interaction
             st.session_state.current_message_tools = {}
